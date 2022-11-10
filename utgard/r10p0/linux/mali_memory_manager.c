@@ -230,6 +230,26 @@ mali_mem_backend *__mali_mem_backend_struct_search(struct mali_session_data *ses
 	return mem_bkend;
 }
 
+mali_mem_backend *__mali_mem_backend_struct_search_with_lock(struct mali_session_data *session, u32 mali_address)
+{
+	struct mali_vma_node *mali_vma_node = NULL;
+	mali_mem_backend *mem_bkend = NULL;
+	mali_mem_allocation *mali_alloc = NULL;
+	MALI_DEBUG_ASSERT_POINTER(session);
+	mali_vma_node = mali_vma_offset_search(&session->allocation_mgr, mali_address, 0);
+	if (NULL == mali_vma_node)  {
+		MALI_DEBUG_PRINT(1, ("mali_mem_backend_struct_search:vma node was NULL\n"));
+		return NULL;
+	}
+	mali_alloc = container_of(mali_vma_node, struct mali_mem_allocation, mali_vma_node);
+	/* Get backend memory & Map on CPU */
+	//mutex_lock(&mali_idr_mutex);
+	mem_bkend = idr_find(&mali_backend_idr, mali_alloc->backend_handle);
+	//mutex_unlock(&mali_idr_mutex);
+	MALI_DEBUG_ASSERT(NULL != mem_bkend);
+	return mem_bkend;
+}
+
 static _mali_osk_errcode_t mali_mem_resize(struct mali_session_data *session, mali_mem_backend *mem_backend, u32 physical_size)
 {
 	_mali_osk_errcode_t ret = _MALI_OSK_ERR_FAULT;
@@ -441,7 +461,7 @@ _mali_osk_errcode_t _mali_ukk_mem_allocate(_mali_uk_alloc_mem_s *args)
 		MALI_PRINT_ERROR(("_mali_ukk_mem_allocate: not supported non page aligned size-->pszie %d, vsize %d\n",  args->psize, args->vsize));
 		return _MALI_OSK_ERR_INVALID_ARGS;
 	} else if ((args->vsize != args->psize) && ((args->flags & _MALI_MEMORY_ALLOCATE_SWAPPABLE) || (args->flags & _MALI_MEMORY_ALLOCATE_SECURE))) {
-		MALI_PRINT_ERROR(("_mali_ukk_mem_allocate: not supported mem resizeable for mem flag %d\n",  args->flags));
+		MALI_PRINT_ERROR(("_mali_ukk_mem_allocate: not supported mem resizable for mem flag %d\n",  args->flags));
 		return _MALI_OSK_ERR_INVALID_ARGS;
 	}
 
@@ -876,7 +896,7 @@ _mali_osk_errcode_t _mali_ukk_mem_cow(_mali_uk_cow_mem_s *args)
 		return ret;
 	}
 
-	/* create new alloction for COW*/
+	/* create new allocation for COW*/
 	mali_allocation = mali_mem_allocation_struct_create(session);
 	if (mali_allocation == NULL) {
 		MALI_DEBUG_PRINT(1, ("_mali_ukk_mem_cow: Failed to create allocation struct!\n"));

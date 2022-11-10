@@ -25,7 +25,7 @@
 /**
  * @file mali_kbase_defs.h
  *
- * Defintions (types, defines, etcs) common to Kbase. They are placed here to
+ * Definitions (types, defines, etcs) common to Kbase. They are placed here to
  * allow the hierarchy of header files to work.
  */
 
@@ -112,7 +112,7 @@
  *
  * @note Soft stop will still be used for non-scheduling purposes e.g. when terminating a context.
  *
- * @note if not in use, define this value to 0 instead of \#undef'ing it
+ * @note if not in use, define this value to 0 instead of \#undef it
  */
 #define KBASE_DISABLE_SCHEDULING_SOFT_STOPS 0
 
@@ -123,7 +123,7 @@
  *
  * @note Hard stop will still be used for non-scheduling purposes e.g. when terminating a context.
  *
- * @note if not in use, define this value to 0 instead of \#undef'ing it
+ * @note if not in use, define this value to 0 instead of \#undef it
  */
 #define KBASE_DISABLE_SCHEDULING_HARD_STOPS 0
 
@@ -155,8 +155,15 @@
 /** setting in kbase_context::as_nr that indicates it's invalid */
 #define KBASEP_AS_NR_INVALID     (-1)
 
-#define KBASE_LOCK_REGION_MAX_SIZE (63)
-#define KBASE_LOCK_REGION_MIN_SIZE (11)
+/**
+ * Maximum size in bytes of a MMU lock region, as a logarithm
+ */
+#define KBASE_LOCK_REGION_MAX_SIZE_LOG2 (48) /*  256 TB */
+
+/**
+ * Minimum size in bytes of a MMU lock region, as a logarithm
+ */
+#define KBASE_LOCK_REGION_MIN_SIZE_LOG2 (15) /* 32 kB */
 
 #define KBASE_TRACE_SIZE_LOG2 8	/* 256 entries */
 #define KBASE_TRACE_SIZE (1 << KBASE_TRACE_SIZE_LOG2)
@@ -548,7 +555,7 @@ struct kbase_ext_res {
  *                         low level state of the atom.
  * @retry_count:           Number of times this atom has been retried. Used by replay
  *                         soft job.
- * @gpu_rb_state:          bitmnask of KBASE_ATOM_GPU_RB_* flags, precisely tracking
+ * @gpu_rb_state:          bitmask of KBASE_ATOM_GPU_RB_* flags, precisely tracking
  *                         atom's state after it has entered Job scheduler on becoming
  *                         runnable. Atom could be blocked due to cross slot dependency
  *                         or waiting for the shader cores to become available or
@@ -663,7 +670,7 @@ struct kbase_jd_atom {
 		 * then all callbacks are taken off the list and freed.
 		 */
 		struct list_head callbacks;
-		/* Atomic counter of number of outstandind dma-buf fence
+		/* Atomic counter of number of outstanding dma-buf fence
 		 * dependencies for this atom. When dep_count reaches 0 the
 		 * atom may be queued.
 		 *
@@ -936,6 +943,21 @@ struct kbase_mmu_table {
 	struct kbase_context *kctx;
 };
 
+/**
+ * struct kbase_reg_zone - Information about GPU memory region zones
+ * @base_pfn: Page Frame Number in GPU virtual address space for the start of
+ *            the Zone
+ * @va_size_pages: Size of the Zone in pages
+ *
+ * Track information about a zone KBASE_REG_ZONE() and related macros.
+ * In future, this could also store the &rb_root that are currently in
+ * &kbase_context and &kbase_csf_device.
+ */
+struct kbase_reg_zone {
+	u64 base_pfn;
+	u64 va_size_pages;
+};
+
 static inline int kbase_as_has_bus_fault(struct kbase_as *as)
 {
 	return as->fault_type == KBASE_MMU_FAULT_TYPE_BUS;
@@ -1172,21 +1194,6 @@ struct kbase_mmu_mode const *kbase_mmu_mode_get_aarch64(void);
 
 
 /**
- * struct kbase_reg_zone - Information about GPU memory region zones
- * @base_pfn: Page Frame Number in GPU virtual address space for the start of
- *            the Zone
- * @va_size_pages: Size of the Zone in pages
- *
- * Track information about a zone KBASE_REG_ZONE() and related macros.
- * In future, this could also store the &rb_root that are currently in
- * &kbase_context
- */
-struct kbase_reg_zone {
-	u64 base_pfn;
-	u64 va_size_pages;
-};
-
-/**
  * struct kbase_device   - Object representing an instance of GPU platform device,
  *                         allocated from the probe method of mali driver.
  * @hw_quirks_sc:          Configuration to be used for the shader cores as per
@@ -1254,7 +1261,7 @@ struct kbase_reg_zone {
  * @as:                    Array of objects representing address spaces of GPU.
  * @as_free:               Bitpattern of free/available GPU address spaces.
  * @as_to_kctx:            Array of pointers to struct kbase_context, having
- *                         GPU adrress spaces assigned to them.
+ *                         GPU address spaces assigned to them.
  * @mmu_mask_change:       Lock to serialize the access to MMU interrupt mask
  *                         register used in the handling of Bus & Page faults.
  * @gpu_props:             Object containing complete information about the
@@ -1770,7 +1777,7 @@ struct kbase_sub_alloc {
  * @api_version:          contains the version number for User/kernel interface,
  *                        used for compatibility check.
  * @event_list:           list of posted events about completed atoms, to be sent to
- *                        event handling thread of Userpsace.
+ *                        event handling thread of Userspace.
  * @event_coalesce_list:  list containing events corresponding to successive atoms
  *                        which have requested deferred delivery of the completion
  *                        events to Userspace.
@@ -1823,7 +1830,7 @@ struct kbase_sub_alloc {
  *                        in the mmap handler.
  * @pending_regions:      Array containing pointers to memory region structures,
  *                        used in conjunction with @cookies bitmask mainly for
- *                        providing a mechansim to have the same value for CPU &
+ *                        providing a mechanism to have the same value for CPU &
  *                        GPU virtual address.
  * @event_queue:          Wait queue used for blocking the thread, which consumes
  *                        the base_jd_event corresponding to an atom, when there
@@ -1870,7 +1877,7 @@ struct kbase_sub_alloc {
  *                        then the context must be retained to ensure that it doesn't
  *                        disappear whilst it is being used. Alternatively, hwaccess_lock
  *                        can be held to ensure the context doesn't disappear (but this
- *                        has restrictions on what other locks can be taken simutaneously).
+ *                        has restrictions on what other locks can be taken simultaneously).
  * @refcount:             Keeps track of the number of users of this context. A user
  *                        can be a job that is available for execution, instrumentation
  *                        needing to 'pin' a context for counter collection, etc.
@@ -1944,7 +1951,7 @@ struct kbase_sub_alloc {
  *	                  2 -> client used KBASE_IOCTL_MEM_JIT_INIT
  * @jit_active_head:      List containing the JIT allocations which are in use.
  * @jit_pool_head:        List containing the JIT allocations which have been
- *                        freed up by userpsace and so not being used by them.
+ *                        freed up by userspace and so not being used by them.
  *                        Driver caches them to quickly fulfill requests for new
  *                        JIT allocations. They are released in case of memory
  *                        pressure as they are put on the @evict_list when they

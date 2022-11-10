@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2019-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2019-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -72,7 +72,7 @@ static struct kbase_process *find_process_node(struct rb_node *node, pid_t tgid)
  * We maintain a rb_tree of each unique process that gets created.
  * and Each process maintains a list of kbase context.
  * This setup is currently used by kernel trace functionality
- * to trace and visualise gpu memory consumption.
+ * to trace and visualize gpu memory consumption.
  *
  * Return: 0 on success and error number on failure.
  */
@@ -152,6 +152,7 @@ int kbase_context_common_init(struct kbase_context *kctx)
 
 	init_waitqueue_head(&kctx->event_queue);
 	atomic_set(&kctx->event_count, 0);
+
 #if !MALI_USE_CSF
 	atomic_set(&kctx->event_closed, false);
 #if IS_ENABLED(CONFIG_GPU_TRACEPOINTS)
@@ -159,11 +160,14 @@ int kbase_context_common_init(struct kbase_context *kctx)
 #endif
 #endif
 
+#if MALI_USE_CSF
+	atomic64_set(&kctx->num_fixable_allocs, 0);
+	atomic64_set(&kctx->num_fixed_allocs, 0);
+#endif
+
 	bitmap_copy(kctx->cookies, &cookies_mask, BITS_PER_LONG);
 
 	kctx->id = atomic_add_return(1, &(kctx->kbdev->ctx_num)) - 1;
-
-	mutex_init(&kctx->legacy_hwcnt_lock);
 
 	mutex_lock(&kctx->kbdev->kctx_list_lock);
 
@@ -235,7 +239,9 @@ static void kbase_remove_kctx_from_process(struct kbase_context *kctx)
 		/* Add checks, so that the terminating process Should not
 		 * hold any gpu_memory.
 		 */
+		spin_lock(&kctx->kbdev->gpu_mem_usage_lock);
 		WARN_ON(kprcs->total_gpu_pages);
+		spin_unlock(&kctx->kbdev->gpu_mem_usage_lock);
 		WARN_ON(!RB_EMPTY_ROOT(&kprcs->dma_buf_root));
 		kfree(kprcs);
 	}
@@ -283,7 +289,7 @@ int kbase_context_mmu_init(struct kbase_context *kctx)
 {
 	return kbase_mmu_init(
 		kctx->kbdev, &kctx->mmu, kctx,
-		base_context_mmu_group_id_get(kctx->create_flags));
+		kbase_context_mmu_group_id_get(kctx->create_flags));
 }
 
 void kbase_context_mmu_term(struct kbase_context *kctx)

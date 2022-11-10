@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2019-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2019-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -45,18 +45,20 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/version.h>
+#include <linux/version_compat_defs.h>
 #include <linux/wait.h>
 
+/* Define static_assert().
+ *
+ * The macro was introduced in kernel 5.1. But older vendor kernels may define
+ * it too.
+ */
 #if KERNEL_VERSION(5, 1, 0) <= LINUX_VERSION_CODE
 #include <linux/build_bug.h>
-#else
+#elif !defined(static_assert)
 // Stringify the expression if no message is given.
 #define static_assert(e, ...)  __static_assert(e, #__VA_ARGS__, #e)
 #define __static_assert(e, msg, ...) _Static_assert(e, msg)
-#endif
-
-#if KERNEL_VERSION(4, 16, 0) >= LINUX_VERSION_CODE
-typedef unsigned int __poll_t;
 #endif
 
 #ifndef ENOTSUP
@@ -120,7 +122,7 @@ struct kbase_kinstr_jm {
  * If we need to change the _meaning_ of one of the fields, i.e. the state
  * machine has had a incompatible change, we can keep the same members in the
  * structure and update the version as above. User code will no longer
- * recognise that it has the supported field and can gracefully explain to the
+ * recognize that it has the supported field and can gracefully explain to the
  * user that the kernel API is no longer supported.
  *
  * When making changes to this structure, make sure they are either:
@@ -155,7 +157,7 @@ static_assert(
  *             close() on the fd. When accessing this, lock the producer spin
  *             lock to prevent races on the allocated memory. The consume lock
  *             does not need to be held because newly-inserted data will always
- *             be outside the currenly-read range.
+ *             be outside the currently-read range.
  * @producer:  The producing spinlock which allows us to push changes into the
  *             buffer at the same time as a user read occurring. This needs to
  *             be locked when saving/restoring the IRQ because we can receive an
@@ -204,9 +206,8 @@ struct reader_changes {
  */
 static inline bool reader_changes_is_valid_size(const size_t size)
 {
-	typedef struct reader_changes changes_t;
-	const size_t elem_size = sizeof(*((changes_t *)0)->data);
-	const size_t size_size = sizeof(((changes_t *)0)->size);
+	const size_t elem_size = sizeof(*((struct reader_changes *)0)->data);
+	const size_t size_size = sizeof(((struct reader_changes *)0)->size);
 	const size_t size_max = (1ull << (size_size * 8)) - 1;
 
 	return is_power_of_2(size) && /* Is a power of two */
@@ -633,11 +634,11 @@ static __poll_t reader_poll(struct file *const file,
 	struct reader_changes *changes;
 
 	if (unlikely(!file || !wait))
-		return -EINVAL;
+		return (__poll_t)-EINVAL;
 
 	reader = file->private_data;
 	if (unlikely(!reader))
-		return -EBADF;
+		return (__poll_t)-EBADF;
 
 	changes = &reader->changes;
 
@@ -662,7 +663,7 @@ static const struct file_operations file_operations = {
 static const size_t kbase_kinstr_jm_readers_max = 16;
 
 /**
- * kbasep_kinstr_jm_release() - Invoked when the reference count is dropped
+ * kbase_kinstr_jm_release() - Invoked when the reference count is dropped
  * @ref: the context reference count
  */
 static void kbase_kinstr_jm_release(struct kref *const ref)
@@ -733,7 +734,7 @@ static int kbase_kinstr_jm_readers_add(struct kbase_kinstr_jm *const ctx,
 }
 
 /**
- * readers_del() - Deletes a reader from the list of readers
+ * kbase_kinstr_jm_readers_del() - Deletes a reader from the list of readers
  * @ctx: the instrumentation context
  * @reader: the reader to delete
  */

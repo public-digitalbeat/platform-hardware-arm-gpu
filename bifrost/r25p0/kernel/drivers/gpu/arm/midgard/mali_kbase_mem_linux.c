@@ -26,7 +26,7 @@
  * @file mali_kbase_mem_linux.c
  * Base kernel memory APIs, Linux implementation.
  */
-
+#include <asm/div64.h>
 #include <linux/compat.h>
 #include <linux/kernel.h>
 #include <linux/bug.h>
@@ -1642,7 +1642,7 @@ u64 kbase_mem_alias(struct kbase_context *kctx, u64 *flags, u64 stride,
 		    u64 *num_pages)
 {
 	struct kbase_va_region *reg;
-	u64 gpu_va;
+	u64 gpu_va, u64_max, result;
 	size_t i;
 	bool coherent;
 
@@ -1670,6 +1670,12 @@ u64 kbase_mem_alias(struct kbase_context *kctx, u64 *flags, u64 stride,
 
 	if (!nents)
 		goto bad_nents;
+
+	u64_max = U64_MAX;
+	do_div(u64_max, nents);
+	result = u64_max;      /* result = U64_MAX / nents */
+	if (stride > result)
+		goto bad_size;
 
 	if ((nents * stride) > (U64_MAX / PAGE_SIZE))
 		/* 64-bit address range is the max */
@@ -2386,7 +2392,7 @@ static int kbase_cpu_mmap(struct kbase_context *kctx,
 	}
 
 	/*
-	 * VM_DONTCOPY - don't make this mapping available in fork'ed processes
+	 * VM_DONTCOPY - don't make this mapping available in forked processes
 	 * VM_DONTEXPAND - disable mremap on this region
 	 * VM_IO - disables paging
 	 * VM_DONTDUMP - Don't include in core dumps (3.7 only)
@@ -2422,7 +2428,7 @@ static int kbase_cpu_mmap(struct kbase_context *kctx,
 
 	if (!(reg->flags & KBASE_REG_CPU_CACHED) &&
 	    (reg->flags & (KBASE_REG_CPU_WR|KBASE_REG_CPU_RD))) {
-		/* We can't map vmalloc'd memory uncached.
+		/* We can't map vmalloc memory uncached.
 		 * Other memory will have been returned from
 		 * kbase_mem_pool which would be
 		 * suitable for mapping uncached.

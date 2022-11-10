@@ -99,7 +99,8 @@ static int kbasep_read_soft_event_status(
 	unsigned char *mapped_evt;
 	struct kbase_vmap_struct map;
 
-	mapped_evt = kbase_vmap(kctx, evt, sizeof(*mapped_evt), &map);
+	mapped_evt = kbase_vmap_prot(kctx, evt, sizeof(*mapped_evt),
+				     KBASE_REG_CPU_RD, &map);
 	if (!mapped_evt)
 		return -EFAULT;
 
@@ -120,7 +121,8 @@ static int kbasep_write_soft_event_status(
 	    (new_status != BASE_JD_SOFT_EVENT_RESET))
 		return -EINVAL;
 
-	mapped_evt = kbase_vmap(kctx, evt, sizeof(*mapped_evt), &map);
+	mapped_evt = kbase_vmap_prot(kctx, evt, sizeof(*mapped_evt),
+				     KBASE_REG_CPU_WR, &map);
 	if (!mapped_evt)
 		return -EFAULT;
 
@@ -640,8 +642,8 @@ static int kbase_debug_copy_prepare(struct kbase_jd_atom *katom)
 				katom->kctx, user_extres.ext_resource &
 				~BASE_EXT_RES_ACCESS_EXCLUSIVE);
 
-		if (NULL == reg || NULL == reg->gpu_alloc ||
-				(reg->flags & KBASE_REG_FREE)) {
+		if (kbase_is_region_invalid_or_free(reg) ||
+		    reg->gpu_alloc == NULL) {
 			ret = -EINVAL;
 			goto out_unlock;
 		}
@@ -1115,8 +1117,8 @@ static int kbase_jit_allocate_process(struct kbase_jd_atom *katom)
 		 * Write the address of the JIT allocation to the user provided
 		 * GPU allocation.
 		 */
-		ptr = kbase_vmap(kctx, info->gpu_alloc_addr, sizeof(*ptr),
-				&mapping);
+		ptr = kbase_vmap_prot(kctx, info->gpu_alloc_addr, sizeof(*ptr),
+				      KBASE_REG_CPU_WR, &mapping);
 		if (!ptr) {
 			/*
 			 * Leave the allocations "live" as the JIT free atom

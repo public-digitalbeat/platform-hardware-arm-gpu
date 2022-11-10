@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  *
- * (C) COPYRIGHT 2019-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2019-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -87,8 +87,6 @@
 #define KBASE_KATOM_FLAG_FAIL_BLOCKER (1<<8)
 /* Atom is currently in the list of atoms blocked on cross-slot dependencies */
 #define KBASE_KATOM_FLAG_JSCTX_IN_X_DEP_LIST (1<<9)
-/* Atom is currently holding a context reference */
-#define KBASE_KATOM_FLAG_HOLDING_CTX_REF (1<<10)
 /* Atom requires GPU to be in protected mode */
 #define KBASE_KATOM_FLAG_PROTECTED (1<<11)
 /* Atom has been stored in runnable_tree */
@@ -125,6 +123,18 @@
 #define KBASE_SERIALIZE_INTER_SLOT (1 << 1)
 /* Reset the GPU after each atom completion */
 #define KBASE_SERIALIZE_RESET (1 << 2)
+
+/**
+ * enum kbase_timeout_selector - The choice of which timeout to get scaled
+ *                               using the lowest GPU frequency.
+ * @KBASE_TIMEOUT_SELECTOR_COUNT: Number of timeout selectors. Must be last in
+ *                                the enum.
+ */
+enum kbase_timeout_selector {
+
+	/* Must be the last in the enum */
+	KBASE_TIMEOUT_SELECTOR_COUNT
+};
 
 #if IS_ENABLED(CONFIG_DEBUG_FS)
 /**
@@ -176,8 +186,6 @@ struct kbase_jd_atom_dependency {
 static inline const struct kbase_jd_atom *
 kbase_jd_katom_dep_atom(const struct kbase_jd_atom_dependency *dep)
 {
-	LOCAL_ASSERT(dep != NULL);
-
 	return (const struct kbase_jd_atom *)(dep->atom);
 }
 
@@ -191,8 +199,6 @@ kbase_jd_katom_dep_atom(const struct kbase_jd_atom_dependency *dep)
 static inline u8 kbase_jd_katom_dep_type(
 		const struct kbase_jd_atom_dependency *dep)
 {
-	LOCAL_ASSERT(dep != NULL);
-
 	return dep->dep_type;
 }
 
@@ -209,8 +215,6 @@ static inline void kbase_jd_katom_dep_set(
 {
 	struct kbase_jd_atom_dependency *dep;
 
-	LOCAL_ASSERT(const_dep != NULL);
-
 	dep = (struct kbase_jd_atom_dependency *)const_dep;
 
 	dep->atom = a;
@@ -226,8 +230,6 @@ static inline void kbase_jd_katom_dep_clear(
 		const struct kbase_jd_atom_dependency *const_dep)
 {
 	struct kbase_jd_atom_dependency *dep;
-
-	LOCAL_ASSERT(const_dep != NULL);
 
 	dep = (struct kbase_jd_atom_dependency *)const_dep;
 
@@ -414,7 +416,7 @@ struct kbase_ext_res {
  * @dma_fence.seqno:       The dma-buf fence sequence number for this atom. This
  *                         is increased every time this katom uses dma-buf fence
  * @dma_fence.callbacks:   List of all callbacks set up to wait on other fences
- * @dma_fence.dep_count:   Atomic counter of number of outstandind dma-buf fence
+ * @dma_fence.dep_count:   Atomic counter of number of outstanding dma-buf fence
  *                         dependencies for this atom.
  * @event_code:            Event code for the job chain represented by the atom,
  *                         both HW and low-level SW events are represented by
@@ -437,7 +439,7 @@ struct kbase_ext_res {
  * @slot_nr:               Job slot chosen for the atom.
  * @atom_flags:            bitmask of KBASE_KATOM_FLAG* flags capturing the
  *                         excat low level state of the atom.
- * @gpu_rb_state:          bitmnask of KBASE_ATOM_GPU_RB_* flags, precisely
+ * @gpu_rb_state:          bitmask of KBASE_ATOM_GPU_RB_* flags, precisely
  *                         tracking atom's state after it has entered
  *                         Job scheduler on becoming runnable. Atom
  *                         could be blocked due to cross slot dependency
@@ -498,7 +500,6 @@ struct kbase_ext_res {
  *                 BASE_JD_REQ_START_RENDERPASS set in its core requirements
  *                 with an atom that has BASE_JD_REQ_END_RENDERPASS set.
  * @jc_fragment:          Set of GPU fragment job chains
- * @retry_count:          TODO: Not used,to be removed
  */
 struct kbase_jd_atom {
 	struct work_struct work;
@@ -570,7 +571,7 @@ struct kbase_jd_atom {
 		 * then all callbacks are taken off the list and freed.
 		 */
 		struct list_head callbacks;
-		/* Atomic counter of number of outstandind dma-buf fence
+		/* Atomic counter of number of outstanding dma-buf fence
 		 * dependencies for this atom. When dep_count reaches 0 the
 		 * atom may be queued.
 		 *
@@ -608,8 +609,6 @@ struct kbase_jd_atom {
 	int slot_nr;
 
 	u32 atom_flags;
-
-	int retry_count;
 
 	enum kbase_atom_gpu_rb_state gpu_rb_state;
 
@@ -653,6 +652,51 @@ static inline bool kbase_jd_katom_is_protected(
 	return (bool)(katom->atom_flags & KBASE_KATOM_FLAG_PROTECTED);
 }
 
+/**
+ * kbase_jd_atom_is_younger - query if one atom is younger by age than another
+ *
+ * @katom_a: the first atom
+ * @katom_b: the second atom
+ *
+ * Return: true if the first atom is strictly younger than the second,
+ *         false otherwise.
+ */
+static inline bool kbase_jd_atom_is_younger(const struct kbase_jd_atom *katom_a,
+					    const struct kbase_jd_atom *katom_b)
+{
+	return ((s32)(katom_a->age - katom_b->age) < 0);
+}
+
+/**
+ * kbase_jd_atom_is_earlier - Check whether the first atom has been submitted
+ *                            earlier than the second one
+ *
+ * @katom_a: the first atom
+ * @katom_b: the second atom
+ *
+ * Return: true if the first atom has been submitted earlier than the
+ * second atom. It is used to understand if an atom that is ready has been
+ * submitted earlier than the currently running atom, so that the currently
+ * running atom should be preempted to allow the ready atom to run.
+ */
+static inline bool kbase_jd_atom_is_earlier(const struct kbase_jd_atom *katom_a,
+					    const struct kbase_jd_atom *katom_b)
+{
+	/* No seq_nr set? */
+	if (!katom_a->seq_nr || !katom_b->seq_nr)
+		return false;
+
+	/* Efficiently handle the unlikely case of wrapping.
+	 * The following code assumes that the delta between the sequence number
+	 * of the two atoms is less than INT64_MAX.
+	 * In the extremely unlikely case where the delta is higher, the comparison
+	 * defaults for no preemption.
+	 * The code also assumes that the conversion from unsigned to signed types
+	 * works because the signed integers are 2's complement.
+	 */
+	return (s64)(katom_a->seq_nr - katom_b->seq_nr) < 0;
+}
+
 /*
  * Theory of operations:
  *
@@ -690,17 +734,13 @@ static inline bool kbase_jd_katom_is_protected(
  * A state machine is used to control incremental rendering.
  */
 enum kbase_jd_renderpass_state {
-	KBASE_JD_RP_COMPLETE,       /* COMPLETE => START */
-	KBASE_JD_RP_START,          /* START => PEND_OOM or COMPLETE */
-	KBASE_JD_RP_PEND_OOM,       /* PEND_OOM => OOM or COMPLETE */
-	KBASE_JD_RP_OOM,            /* OOM => RETRY */
-	KBASE_JD_RP_RETRY,          /* RETRY => RETRY_PEND_OOM or
-				     *          COMPLETE
-				     */
-	KBASE_JD_RP_RETRY_PEND_OOM, /* RETRY_PEND_OOM => RETRY_OOM or
-				     *                   COMPLETE
-				     */
-	KBASE_JD_RP_RETRY_OOM,      /* RETRY_OOM => RETRY */
+	KBASE_JD_RP_COMPLETE, /* COMPLETE => START */
+	KBASE_JD_RP_START, /* START => PEND_OOM or COMPLETE */
+	KBASE_JD_RP_PEND_OOM, /* PEND_OOM => OOM or COMPLETE */
+	KBASE_JD_RP_OOM, /* OOM => RETRY */
+	KBASE_JD_RP_RETRY, /* RETRY => RETRY_PEND_OOM or COMPLETE */
+	KBASE_JD_RP_RETRY_PEND_OOM, /* RETRY_PEND_OOM => RETRY_OOM or COMPLETE */
+	KBASE_JD_RP_RETRY_OOM /* RETRY_OOM => RETRY */
 };
 
 /**
@@ -773,7 +813,7 @@ struct kbase_jd_renderpass {
  *                            atom completes
  *                            execution on GPU or the input fence get signaled.
  * @tb_lock:                  Lock to serialize the write access made to @tb to
- *                            to store the register access trace messages.
+ *                            store the register access trace messages.
  * @tb:                       Pointer to the Userspace accessible buffer storing
  *                            the trace messages for register read/write
  *                            accesses made by the Kbase. The buffer is filled

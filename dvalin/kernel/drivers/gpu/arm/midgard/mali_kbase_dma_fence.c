@@ -161,7 +161,7 @@ kbase_dma_fence_cancel_atom(struct kbase_jd_atom *katom)
 	if (katom->status == KBASE_JD_ATOM_STATE_QUEUED) {
 		/* Wait was cancelled - zap the atom */
 		katom->event_code = BASE_JD_EVENT_JOB_CANCELLED;
-		if (jd_done_nolock(katom, NULL))
+		if (kbase_jd_done_nolock(katom, true))
 			kbase_js_sched_all(katom->kctx->kbdev);
 	}
 }
@@ -193,10 +193,10 @@ kbase_dma_fence_work(struct work_struct *pwork)
 	kbase_fence_free_callbacks(katom);
 	/*
 	 * Queue atom on GPU, unless it has already completed due to a failing
-	 * dependency. Run jd_done_nolock() on the katom if it is completed.
+	 * dependency. Run kbase_jd_done_nolock() on the katom if it is completed.
 	 */
 	if (unlikely(katom->status == KBASE_JD_ATOM_STATE_COMPLETED))
-		jd_done_nolock(katom, NULL);
+		kbase_jd_done_nolock(katom, true);
 	else
 		kbase_jd_dep_clear_locked(katom);
 
@@ -249,8 +249,10 @@ kbase_dma_fence_add_reservation_callback(struct kbase_jd_atom *katom,
 
 #if (KERNEL_VERSION(5, 4, 0) > LINUX_VERSION_CODE)
 	err = reservation_object_get_fences_rcu(
-#else
+#elif (KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE)
 	err = dma_resv_get_fences_rcu(
+#else
+	err = dma_resv_get_fences(
 #endif
 						resv,
 						&excl_fence,

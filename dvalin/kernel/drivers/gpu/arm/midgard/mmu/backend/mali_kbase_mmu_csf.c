@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2019-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2019-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -130,6 +130,7 @@ void kbase_mmu_report_mcu_as_fault_and_reset(struct kbase_device *kbdev,
 	if (kbase_prepare_to_reset_gpu(kbdev,
 				       RESET_FLAGS_HWC_UNRECOVERABLE_ERROR))
 		kbase_reset_gpu(kbdev);
+
 }
 KBASE_EXPORT_TEST_API(kbase_mmu_report_mcu_as_fault_and_reset);
 
@@ -151,8 +152,8 @@ void kbase_gpu_report_bus_fault_and_kill(struct kbase_context *kctx,
 
 	/* terminal fault, print info about the fault */
 	dev_err(kbdev->dev,
-		"GPU bus fault in AS%d at VA 0x%016llX\n"
-		"VA_VALID: %s\n"
+		"GPU bus fault in AS%d at PA 0x%016llX\n"
+		"PA_VALID: %s\n"
 		"raw fault status: 0x%X\n"
 		"exception type 0x%X: %s\n"
 		"access type 0x%X: %s\n"
@@ -482,8 +483,6 @@ static void kbase_mmu_gpu_fault_worker(struct work_struct *data)
 	kbase_csf_ctx_handle_fault(kctx, fault);
 	kbase_ctx_sched_release_ctx_lock(kctx);
 
-	atomic_dec(&kbdev->faults_pending);
-
 	/* A work for GPU fault is complete.
 	 * Till reaching here, no further GPU fault will be reported.
 	 * Now clear the GPU fault to allow next GPU fault interrupt report.
@@ -492,6 +491,8 @@ static void kbase_mmu_gpu_fault_worker(struct work_struct *data)
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_COMMAND),
 			GPU_COMMAND_CLEAR_FAULT);
 	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
+
+	atomic_dec(&kbdev->faults_pending);
 }
 
 /**

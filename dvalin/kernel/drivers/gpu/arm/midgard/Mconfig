@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 #
-# (C) COPYRIGHT 2012-2021 ARM Limited. All rights reserved.
+# (C) COPYRIGHT 2012-2022 ARM Limited. All rights reserved.
 #
 # This program is free software and is provided to you under the terms of the
 # GNU General Public License version 2 as published by the Free Software
@@ -35,7 +35,7 @@ config MALI_PLATFORM_NAME
 	default "devicetree"
 	help
 	  Enter the name of the desired platform configuration directory to
-	  include in the build. 'platform/$(MALI_PLATFORM_NAME)/Makefile' must
+	  include in the build. 'platform/$(MALI_PLATFORM_NAME)/Kbuild' must
 	  exist.
 
 	  When PLATFORM_CUSTOM is set, this needs to be set manually to
@@ -47,6 +47,14 @@ config MALI_REAL_HW
 	default y
 	default n if NO_MALI
 
+config MALI_PLATFORM_DT_PIN_RST
+	bool "Enable Juno GPU Pin reset"
+	depends on MALI_MIDGARD
+	default n
+	default y if BUSLOG
+	help
+	  Enables support for GPUs pin reset on Juno platforms.
+
 config MALI_CSF_SUPPORT
 	bool "Enable Mali CSF based GPU support"
 	depends on MALI_MIDGARD
@@ -57,8 +65,7 @@ config MALI_CSF_SUPPORT
 config MALI_DEVFREQ
 	bool "Enable devfreq support for Mali"
 	depends on MALI_MIDGARD
-	default y if PLATFORM_JUNO
-	default y if PLATFORM_CUSTOM
+	default y
 	help
 	  Support devfreq for Mali.
 
@@ -183,6 +190,20 @@ config MALI_CORESTACK
 	  This feature is currently only supported on t-Six and t-HEx GPUs.
 
 	  If unsure, say N.
+
+config MALI_FW_CORE_DUMP
+	bool "Enable support for FW core dump"
+	depends on MALI_MIDGARD && MALI_EXPERT && MALI_CSF_SUPPORT
+	default n
+	help
+	  Adds ability to request firmware core dump
+
+	  Example:
+	  * To explicitly request core dump:
+		echo 1 >/sys/kernel/debug/mali0/fw_core_dump
+	  * To output current core dump (after explicitly requesting a core dump,
+	    or kernel driver reported an internal firmware error):
+                cat /sys/kernel/debug/mali0/fw_core_dump
 
 choice
 	prompt "Error injection level"

@@ -47,6 +47,9 @@
 #include <mali_kbase_hwaccess_jm.h>
 #include <mali_kbase_hwaccess_time.h>
 #include <mali_kbase_mem.h>
+#if !MALI_USE_CSF
+#include <mali_kbase_hwaccess_jm.h>
+#endif
 
 #define KBASE_MMU_PAGE_ENTRIES 512
 
@@ -230,7 +233,7 @@ static void kbase_gpu_mmu_handle_write_fault(struct kbase_context *kctx,
 	/* Find region and check if it should be writable. */
 	region = kbase_region_tracker_find_region_enclosing_address(kctx,
 			fault->addr);
-	if (!region || region->flags & KBASE_REG_FREE) {
+	if (kbase_is_region_invalid_or_free(region)) {
 		kbase_gpu_vm_unlock(kctx);
 		kbase_mmu_report_fault_and_kill(kctx, faulting_as,
 				"Memory is not mapped on the GPU",
@@ -637,7 +640,7 @@ page_fault_retry:
 
 	region = kbase_region_tracker_find_region_enclosing_address(kctx,
 			fault->addr);
-	if (!region || region->flags & KBASE_REG_FREE) {
+	if (kbase_is_region_invalid_or_free(region)) {
 		kbase_gpu_vm_unlock(kctx);
 		kbase_mmu_report_fault_and_kill(kctx, faulting_as,
 				"Memory is not mapped on the GPU", fault);
@@ -668,7 +671,7 @@ page_fault_retry:
 
 	/* find the size we need to grow it by */
 	/* we know the result fit in a size_t due to kbase_region_tracker_find_region_enclosing_address
-	 * validating the fault_adress to be within a size_t from the start_pfn */
+	 * validating the fault_address to be within a size_t from the start_pfn */
 	fault_rel_pfn = fault_pfn - region->start_pfn;
 
 	if (fault_rel_pfn < kbase_reg_current_backed_size(region)) {
@@ -1410,7 +1413,7 @@ static void kbase_mmu_flush_invalidate_noretain(struct kbase_context *kctx,
 		 * recover */
 		dev_err(kbdev->dev, "Flush for GPU page table update did not complete. Issuing GPU soft-reset to recover\n");
 
-		if (kbase_prepare_to_reset_gpu_locked(kbdev))
+		if (kbase_prepare_to_reset_gpu_locked(kbdev, RESET_FLAGS_NONE))
 			kbase_reset_gpu_locked(kbdev);
 	}
 
@@ -1458,7 +1461,8 @@ static void kbase_mmu_flush_invalidate_as(struct kbase_device *kbdev,
 		 */
 		dev_err(kbdev->dev, "Flush for GPU page table update did not complete. Issueing GPU soft-reset to recover\n");
 
-		if (kbase_prepare_to_reset_gpu(kbdev))
+		if (kbase_prepare_to_reset_gpu(kbdev,
+					       RESET_FLAGS_HWC_UNRECOVERABLE_ERROR))
 			kbase_reset_gpu(kbdev);
 	}
 
@@ -1564,6 +1568,15 @@ void kbase_mmu_disable(struct kbase_context *kctx)
 	kbase_mmu_flush_invalidate_noretain(kctx, 0, ~0, true);
 
 	kctx->kbdev->mmu_mode->disable_as(kctx->kbdev, kctx->as_nr);
+#if !MALI_USE_CSF
+	/*
+	 * JM GPUs has some L1 read only caches that need to be invalidated
+	 * with START_FLUSH configuration. Purge the MMU disabled kctx from
+	 * the slot_rb tracking field so such invalidation is performed when
+	 * a new katom is executed on the affected slots.
+	 */
+	kbase_backend_slot_kctx_purge_locked(kctx->kbdev, kctx);
+#endif
 }
 KBASE_EXPORT_TEST_API(kbase_mmu_disable);
 
@@ -2088,7 +2101,8 @@ void bus_fault_worker(struct work_struct *data)
 		 * are evicted from the GPU before the switch.
 		 */
 		dev_err(kbdev->dev, "GPU bus error occurred. For this GPU version we now soft-reset as part of bus error recovery\n");
-		reset_status = kbase_prepare_to_reset_gpu(kbdev);
+		reset_status = kbase_prepare_to_reset_gpu(kbdev,
+							  RESET_FLAGS_HWC_UNRECOVERABLE_ERROR);
 	}
 	/* NOTE: If GPU already powered off for suspend, we don't need to switch to unmapped */
 	if (!kbase_pm_context_active_handle_suspend(kbdev, KBASE_PM_SUSPEND_HANDLER_DONT_REACTIVATE)) {
@@ -2386,7 +2400,8 @@ static void kbase_mmu_report_fault_and_kill(struct kbase_context *kctx,
 		 * are evicted from the GPU before the switch.
 		 */
 		dev_err(kbdev->dev, "Unhandled page fault. For this GPU version we now soft-reset the GPU as part of page fault recovery.");
-		reset_status = kbase_prepare_to_reset_gpu(kbdev);
+		reset_status = kbase_prepare_to_reset_gpu(kbdev,
+							  RESET_FLAGS_HWC_UNRECOVERABLE_ERROR);
 	}
 	/* switch to UNMAPPED mode, will abort all jobs and stop any hw counter dumping */
 	spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
@@ -2551,7 +2566,7 @@ void kbase_as_poking_timer_release_atom(struct kbase_device *kbdev, struct kbase
 			as->poke_state = 0u;
 
 			/* The poke associated with the atom has now finished. If this is
-			 * also the last atom on the context, then we can guarentee no more
+			 * also the last atom on the context, then we can guarantee no more
 			 * pokes (and thus no more poking register accesses) will occur on
 			 * the context until new atoms are run */
 		}
@@ -2599,7 +2614,8 @@ void kbase_mmu_interrupt_process(struct kbase_device *kbdev,
 			 * point.
 			 */
 			dev_err(kbdev->dev, "GPU bus error occurred. For this GPU version we now soft-reset as part of bus error recovery\n");
-			reset_status = kbase_prepare_to_reset_gpu_locked(kbdev);
+			reset_status = kbase_prepare_to_reset_gpu_locked(kbdev,
+									 RESET_FLAGS_NONE);
 			if (reset_status)
 				kbase_reset_gpu_locked(kbdev);
 		}
